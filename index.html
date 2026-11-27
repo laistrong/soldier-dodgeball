@@ -7,10 +7,10 @@
  .court canvas{height:min(70dvh,470px);width:100%}.controls{display:none}.court:has(.screen[hidden]) #touch-guide{display:flex}
  #selection h2{font-size:19px}.roster{grid-template-columns:repeat(4,minmax(0,1fr));margin:5px 0}.pick{font-size:12px}
  main:has(#selection[hidden])>h1,main:has(#selection[hidden])>p:not(#matchup){display:none}
-}</style>
-<main><h1>小兵躲避球：接力盃</h1><p>從四位隊員挑三位，六人同時上場。閃過三球就能丟蓄力球。</p><section id="selection"><h2>3 對 3｜選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
-<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide" aria-hidden="true"><span>◀ 按住左移</span><span>點對手瞄準丟球</span><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">三對三同場。擊退全隊即勝；時間到比存活人數，再比剩餘耐力。</p><button id="start">開始</button></div></div>
-<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">反擊</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機橫放：按住球場左下或右下移動，點上半場丟球。直式可拖曳移動。</p></main>
+}#touch-guide button{pointer-events:auto;padding:3px 12px;min-height:40px}#touch-guide{align-items:end}</style>
+<main><h1>小兵躲避球：接力盃</h1><p>六人同場只用一顆球。接住就取得球權，被打中就出局。</p><section id="selection"><h2>3 對 3｜選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
+<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide" aria-hidden="true"><span>◀ 按住左移</span><button id="catch-court" type="button">接球</button><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">三對三同場。擊退全隊即勝；時間到比存活人數，人數相同就平手。</p><button id="start">開始</button></div></div>
+<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">投球</button><button id="catch">接球</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機橫放：按住左右移動，點對手投球；來球靠近時按「接球」。電腦按 C 接球。</p></main>
 <script>
 const el=id=>document.getElementById(id);
 const court=el('court'), ctx=court.getContext('2d');
@@ -49,7 +49,7 @@ function renderRoster(){
   button.setAttribute('aria-pressed',String(position>=0));
   button.disabled=position<0&&lineup.length===3;
   const details=document.createElement('small');
-  details.textContent='速度 '+member.speed+' · 耐力 '+member.hearts+' · 球力 '+member.damage;
+  details.textContent='速度 '+member.speed+' · 接球 '+member.hearts+' · 球力 '+member.damage;
   button.replaceChildren((position>=0?(position+1)+'. ':'')+member.name+'｜'+member.role,details);
  });
  el('lineup').textContent='隊長與隊友：'+(lineup.map(i=>roster[i].name).join(' → ')||'尚未選角')+'（'+lineup.length+'/3）';
@@ -59,27 +59,29 @@ renderRoster();
 let charge=0, touchTarget=null;
 const courtDirections=new Map();
 const landscape=matchMedia("(orientation: landscape) and (max-height: 600px)");
-let active=false, points=0, t=0, next=0, assist=0, cooldown=0, balls=[], flash=0;
+let holder=null, flight=null, catchUntil=0, heldSince=0;
+let active=false, points=0, t=0, cooldown=0, flash=0;
 const living=team=>team.filter(member=>member.health>0);
-const health=team=>team.reduce((sum,member)=>sum+member.health,0);
 function stats(){
  el('charge').textContent=charge===3?'就緒':charge+'/3';
- el('throw').textContent=charge===3?'蓄力反擊':'反擊';
+ el('throw').textContent=charge===3?'蓄力投球':'投球';
  el('hp').textContent=living(allies).length;
  el('score').textContent=points;
  el('time').textContent=Math.max(0,Math.ceil(60-t));
- el('matchup').textContent=ally().name+'｜耐力 '+(allies[captain]?.health ?? 0)+'　對方剩 '+living(rivals).length+'/3';
+ el('matchup').textContent=(holder?(allies.includes(holder)?'我方持球':'對方持球'):'球在空中')+
+   '｜我方 '+living(allies).length+'：'+living(rivals).length+' 對方';
+
 }
 function start(){
  if(lineup.length!==3)return;
- allies=lineup.map((id,i)=>({x:fieldSlot[i],y:i===0?418:360,health:roster[id].hearts,inv:0,profile:roster[id]}));
- rivals=opponents.map((profile,i)=>({x:fieldSlot[i],y:i===0?53:110,health:profile.hearts,inv:0,profile}));
- captain=0;active=true;touchTarget=null;charge=points=t=cooldown=flash=0;next=.65;assist=2;balls=[];
+ allies=lineup.map((id,i)=>({x:fieldSlot[i],y:i===0?418:360,health:1,inv:0,profile:roster[id]}));
+ rivals=opponents.map((profile,i)=>({x:fieldSlot[i],y:i===0?53:110,health:1,inv:0,profile}));
+ captain=0;active=true;touchTarget=null;charge=points=t=cooldown=flash=0;holder=allies[0];flight=null;catchUntil=0;heldSince=0;
  inputs.clear();courtDirections.clear();el('selection').hidden=true;el('screen').hidden=true;stats();
 }
 function end(){
  active=false;inputs.clear();courtDirections.clear();touchTarget=null;
- const difference=living(allies).length-living(rivals).length || health(allies)-health(rivals);
+ const difference=living(allies).length-living(rivals).length;
  el('selection').hidden=false;
  el('heading').textContent=difference>0?'我方獲勝！':difference<0?'對手獲勝':'平手！';
  el('hint').textContent='我方 '+living(allies).length+' 人｜對方 '+living(rivals).length+' 人｜'+points+' 分';
@@ -88,16 +90,17 @@ function end(){
 function launch(from,x,y,speed,team,damage,power=false){
  const length=Math.hypot(x-from.x,y-from.y);
  if(!length)return;
- balls.push({x:from.x,y:from.y,vx:(x-from.x)*speed/length,vy:(y-from.y)*speed/length,team,damage,power});
+ flight={x:from.x,y:from.y,vx:(x-from.x)*speed/length,vy:(y-from.y)*speed/length,team,power};
+ holder=null;
 }
 function toss(aim){
- if(!active||cooldown>0)return;
- const from=allies[captain];
+ if(!active||cooldown>0||!holder||!allies.includes(holder))return;
+ const from=holder;
  const target=living(rivals).reduce((best,member)=>
    !best||Math.abs(member.x-aim)<Math.abs(best.x-aim)?member:best,null);
  if(!target)return;
  cooldown=.43;const power=charge===3;if(power)charge=0;
- launch(from,target.x,target.y,ally().throwSpeed+(power?200:0),true,ally().damage+(power?1:0),power);
+ launch(from,target.x,target.y,from.profile.throwSpeed+(power?200:0)+from.profile.damage*24,true,1,power);
 }
 function circle(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();}
 function soldier(x,y,uniform,helmet){
@@ -121,7 +124,9 @@ function draw(){
    if(member.inv<=0||Math.floor(member.inv*13)%2===0)soldier(member.x,member.y,...member.profile.color);
    for(let i=0;i<member.health;i++)ctx.fillRect(member.x-12+i*8,member.y+27,6,4);
  }
- for(const b of balls){circle(b.x,b.y,b.power?16:10,b.power?'#91eff6':b.team?'#f5d476':'#ff856e');circle(b.x-3,b.y-4,3,'#fff0c9');}
+ if(flight)circle(flight.x,flight.y,flight.power?13:9,flight.power?'#91eff6':'#ffd476');
+ else if(holder)circle(holder.x+17,holder.y+4,9,'#ffd476');
+
 }
 function step(dt){
  t+=dt;cooldown-=dt;flash-=dt;
@@ -144,48 +149,44 @@ function step(dt){
    member.x=fieldSlot[i]+(i===0?90:65)*Math.sin(t*member.profile.speed/145+i*2);
  }
  if(inputs.has(' '))toss(controlled.x);
- if(t>=assist){
-   assist=t+2.2;
-   const helpers=living(allies).filter(member=>member!==controlled);
-   const targets=living(rivals);
-   if(helpers.length){
-     const from=helpers[Math.floor(Math.random()*helpers.length)];
-     const target=targets[Math.floor(Math.random()*targets.length)];
-     launch(from,target.x,target.y,from.profile.throwSpeed*.85,true,from.profile.damage);
-   }
- }
- if(t>=next){
-   next=t+Math.max(.55,1.2-t*.01);
-   const attackers=living(rivals), targets=living(allies);
-   const from=attackers[Math.floor(Math.random()*attackers.length)];
+ if(holder&&rivals.includes(holder)&&t-heldSince>.8){
+   const targets=living(allies);
    const target=targets[Math.floor(Math.random()*targets.length)];
-   launch(from,target.x,target.y,from.profile.throwSpeed+t*1.4,false,1);
+   launch(holder,target.x,target.y,holder.profile.throwSpeed+t*1.4,false,1);
  }
- balls=balls.filter(ball=>{
+ if(flight){
+   const ball=flight;
    ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
-   const hit=(ball.team?rivals:allies).find(member=>member.health>0&&member.inv<=0&&
-     Math.hypot(ball.x-member.x,ball.y-member.y)<(ball.power?33:24));
+   const defending=ball.team?rivals:allies;
+   const hit=living(defending).find(member=>Math.hypot(ball.x-member.x,ball.y-member.y)<(ball.power?30:24));
    if(hit){
-     hit.health=Math.max(0,hit.health-ball.damage);
-     hit.inv=.35;
-     if(ball.team)points+=ball.power?200:100;
-     else {
-       flash=.23;
-       if(hit===allies[captain]&&!hit.health){
-         const nextCaptain=allies.findIndex(member=>member.health>0);
-         if(nextCaptain>=0){captain=nextCaptain;touchTarget=null;}
+     const caught=ball.team?!ball.power&&Math.random()<.18:hit===controlled&&t<=catchUntil;
+     flight=null;heldSince=t;catchUntil=0;
+     if(caught){
+       holder=hit;
+       if(!ball.team){points+=25;charge=Math.min(3,charge+1);}
+     }else{
+       hit.health=0;flash=.23;
+       if(ball.team)points+=ball.power?200:100;
+       if(hit===controlled){
+         const replacement=allies.findIndex(member=>member.health>0);
+         if(replacement>=0){captain=replacement;touchTarget=null;}
        }
+       holder=living(defending)[0]||null;
      }
-     return false;
+   }else if(ball.x<-15||ball.x>W+15||ball.y<-15||ball.y>H+15){
+     flight=null;holder=living(defending)[0];heldSince=t;
+     if(!ball.team){points+=10;charge=Math.min(3,charge+1);}
    }
-   if(ball.x>=-15&&ball.x<=W+15&&ball.y>=-15&&ball.y<=H+15)return true;
-   if(!ball.team){points+=10;charge=Math.min(3,charge+1);}
-   return false;
- });
+ }
  stats();if(!living(allies).length||!living(rivals).length||t>=60)end();
 }
 let last=performance.now();
 function frame(now){const dt=Math.min(.04,(now-last)/1000);last=now;if(active)step(dt);draw();requestAnimationFrame(frame);}
+function catchBall(){
+ if(active&&flight&&!flight.team&&t>catchUntil){catchUntil=t+.14+ally().hearts*.05;}
+}
+el('catch').onclick=catchBall;el('catch-court').onclick=catchBall;
 el('start').onclick=start;
 el('throw').onpointerdown=event=>{if(event.button===0)toss(allies[captain]?.x);};
 el('throw').onclick=event=>{if(event.detail===0)toss(allies[captain]?.x);};
@@ -210,7 +211,7 @@ for(const event of ['pointerup','pointercancel','lostpointercapture']){
  court.addEventListener(event,e=>courtDirections.delete(e.pointerId));
 }
 landscape.addEventListener('change',()=>{courtDirections.clear();touchTarget=null;});
-window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss(allies[captain]?.x);}});
+window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();if(active&&key==='c'){e.preventDefault();if(!e.repeat)catchBall();return;}const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss(allies[captain]?.x);}});
 window.addEventListener('keyup',e=>inputs.delete(e.key.length===1?e.key.toLowerCase():e.key));
 window.addEventListener('blur',()=>{inputs.clear();courtDirections.clear();touchTarget=null;});
 requestAnimationFrame(frame);
