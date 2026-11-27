@@ -1,0 +1,68 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小兵躲避球：接力盃</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#142b25;color:#fff8df;font:16px system-ui,sans-serif}main{width:min(94%,660px);margin:24px auto}h1{font-size:clamp(29px,7vw,51px);margin:0}p{margin:8px 0;color:#d4e5c9}.hud,.controls{display:flex;justify-content:space-between;gap:8px;margin:12px 0}.hud span{background:#253f32;border-radius:10px;padding:8px;flex:1;text-align:center}.court{position:relative;border:3px solid #f5d476;border-radius:18px;overflow:hidden}canvas{display:block;width:100%;height:auto;touch-action:none}.screen{position:absolute;inset:0;background:#10261fdb;display:grid;place-content:center;text-align:center;padding:18px}.screen[hidden]{display:none}h2{font-size:clamp(22px,6vw,37px);margin:0}button{font:700 17px system-ui;border:0;border-radius:10px;background:#f5d476;color:#162d22;min-height:48px;padding:10px 18px;touch-action:none;cursor:pointer}.controls button{flex:1}.screen button{justify-self:center;margin-top:12px}button:focus-visible{outline:3px solid #fff;outline-offset:-5px}
+</style>
+<main><h1>小兵躲避球：接力盃</h1><p>三位小兵輪流上場，每閃過三球就能丟一發蓄力球。</p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
+<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">閃球 10 分，普通命中 100 分，蓄力命中 200 分。</p><button id="start">開始</button></div></div>
+<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">反擊</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機：按左右鍵或在場上拖動。</p></main>
+<script>
+const el=id=>document.getElementById(id);
+const court=el('court'), ctx=court.getContext('2d');
+const inputs=new Set(), W=560,H=470;
+const uniforms=[["#b6ad68","#2a4834"],["#74bdbc","#285961"],["#e2a657","#7a4732"]];
+let charge=0;
+let active=false, player=280, enemy=280, hp=3, points=0, t=0, next=0, cooldown=0, inv=0, balls=[], flash=0;
+function stats(){el('charge').textContent=charge===3?'就緒':charge+'/3';el('throw').textContent=charge===3?'蓄力反擊':'反擊';el('hp').textContent=hp;el('score').textContent=points;el('time').textContent=Math.max(0,Math.ceil(60-t));}
+function start(){active=true;player=enemy=280;hp=3;charge=0;points=t=cooldown=inv=flash=0;next=.55;balls=[];inputs.clear();el('screen').hidden=true;stats();}
+function end(){active=false;inputs.clear();el('heading').textContent=hp?'時間到！':'全隊退場';el('hint').textContent='這一輪拿到 '+points+' 分';el('start').textContent='再玩一次';el('screen').hidden=false;el('start').focus();}
+function toss(){if(!active||cooldown>0)return;cooldown=.43;const power=charge===3;if(power)charge=0;balls.push({x:player,y:399,vx:0,vy:power?-700:-465,team:true,power});}
+function circle(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();}
+function soldier(x,y,uniform,helmet){
+ ctx.fillStyle='#142b25';ctx.fillRect(x-15,y+10,12,12);ctx.fillRect(x+3,y+10,12,12);
+ ctx.fillStyle=uniform;ctx.fillRect(x-21,y-2,42,17);circle(x,y-11,18,'#f6c697');
+ ctx.fillStyle=helmet;ctx.fillRect(x-21,y-19,42,8);ctx.beginPath();ctx.arc(x,y-19,19,Math.PI,0);ctx.fill();
+ circle(x-6,y-7,2,'#192623');circle(x+6,y-7,2,'#192623');
+}
+function draw(){
+ ctx.fillStyle=flash>0?'#75504a':'#48674c';ctx.fillRect(0,0,W,H);
+ ctx.fillStyle='#567653';for(let x=0;x<W;x+=80)ctx.fillRect(x,0,40,H);
+ ctx.strokeStyle='#f0dea7';ctx.lineWidth=3;ctx.strokeRect(22,22,W-44,H-44);
+ ctx.beginPath();ctx.moveTo(22,235);ctx.lineTo(W-22,235);ctx.stroke();
+ ctx.beginPath();ctx.arc(280,235,48,0,Math.PI*2);ctx.stroke();
+ for(let i=0;i<12;i++){ctx.fillStyle=i%2?'#edc56e':'#314a39';ctx.fillRect(22+i*43,22,43,7);ctx.fillRect(22+i*43,H-29,43,7);}
+ soldier(enemy,56,'#ad5c4d','#763a36');
+ if(inv<=0||Math.floor(inv*13)%2===0)soldier(player,424,...uniforms[Math.min(2,3-hp)]);
+ for(const b of balls){circle(b.x,b.y,b.power?16:10,b.power?'#91eff6':b.team?'#f5d476':'#ff856e');circle(b.x-3,b.y-4,3,'#fff0c9');}
+}
+function step(dt){
+ t+=dt;cooldown-=dt;inv-=dt;flash-=dt;
+ const right=inputs.has('ArrowRight')||inputs.has('d'),left=inputs.has('ArrowLeft')||inputs.has('a');
+ player=Math.max(40,Math.min(520,player+280*dt*(Number(right)-Number(left))));
+ enemy=280+202*Math.sin(t*(1.25+t/85));
+ if(inputs.has(' '))toss();
+ if(t>=next){next=t+Math.max(.42,1.22-t*.015);const vy=225+t*2.4;balls.push({x:enemy,y:78,vx:(player-enemy)*vy/345,vy,team:false});}
+ balls=balls.filter(b=>{
+   b.x+=b.vx*dt;b.y+=b.vy*dt;
+   if(b.team&&Math.hypot(b.x-enemy,b.y-56)<(b.power?36:27)){points+=b.power?200:100;return false;}
+   if(!b.team&&Math.hypot(b.x-player,b.y-416)<27&&inv<=0){hp--;inv=.9;flash=.23;return false;}
+   if(!b.team&&b.y>H+10){points+=10;charge=Math.min(3,charge+1);return false;}
+   return b.y>-15;
+ });
+ stats();if(hp<=0||t>=60)end();
+}
+let last=performance.now();
+function frame(now){const dt=Math.min(.04,(now-last)/1000);last=now;if(active)step(dt);draw();requestAnimationFrame(frame);}
+el('start').onclick=start;el('throw').onclick=toss;
+for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight']]){
+ const button=el(id);
+ button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);inputs.add(key);};
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,()=>inputs.delete(key));
+}
+function drag(e){const rect=court.getBoundingClientRect();player=Math.max(40,Math.min(520,(e.clientX-rect.left)*W/rect.width));}
+court.onpointerdown=e=>{if(active){court.setPointerCapture(e.pointerId);drag(e);}};
+court.onpointermove=e=>{if(active&&court.hasPointerCapture(e.pointerId))drag(e);};
+window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss();}});
+window.addEventListener('keyup',e=>inputs.delete(e.key.length===1?e.key.toLowerCase():e.key));
+window.addEventListener('blur',()=>inputs.clear());
+requestAnimationFrame(frame);
+</script></html>
