@@ -8,8 +8,8 @@
  #selection h2{font-size:19px}.roster{grid-template-columns:repeat(4,minmax(0,1fr));margin:5px 0}.pick{font-size:12px}
  main:has(#selection[hidden])>h1,main:has(#selection[hidden])>p:not(#matchup){display:none}
 }</style>
-<main><h1>小兵躲避球：接力盃</h1><p>從四位隊員挑三位，依選擇順序輪替。閃過三球就能丟蓄力球。</p><section id="selection"><h2>選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
-<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide" aria-hidden="true"><span>◀ 按住左移</span><span>點上半場丟球</span><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">選好三位再上場。60 秒內擊退三名對手即可獲勝。</p><button id="start">開始</button></div></div>
+<main><h1>小兵躲避球：接力盃</h1><p>從四位隊員挑三位，六人同時上場。閃過三球就能丟蓄力球。</p><section id="selection"><h2>3 對 3｜選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
+<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide" aria-hidden="true"><span>◀ 按住左移</span><span>點對手瞄準丟球</span><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">三對三同場。擊退全隊即勝；時間到比存活人數，再比剩餘耐力。</p><button id="start">開始</button></div></div>
 <div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">反擊</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機橫放：按住球場左下或右下移動，點上半場丟球。直式可拖曳移動。</p></main>
 <script>
 const el=id=>document.getElementById(id);
@@ -22,8 +22,14 @@ const roster=[
  {name:'青禾', role:'全能型', speed:295, hearts:2, throwSpeed:515, damage:1, color:['#9fd78a','#416c40']}
 ];
 const lineup=[];
-let stamina=0, rival=0, rivalHealth=4;
-const ally=()=>roster[lineup[Math.min(lineup.length-1,3-hp)] ?? 0];
+let allies=[], rivals=[], captain=0;
+const ally=()=>roster[lineup[captain] ?? 0];
+const fieldSlot=[280,110,450];
+const opponents=[
+ {name:'赤帆',speed:175,hearts:3,throwSpeed:260,damage:1,color:['#ad5c4d','#763a36']},
+ {name:'暮鐘',speed:145,hearts:4,throwSpeed:218,damage:1,color:['#b487b9','#59405b']},
+ {name:'沙舟',speed:217,hearts:2,throwSpeed:285,damage:1,color:['#c17e4c','#713d25']}
+];
 function pick(index){
  const position=lineup.indexOf(index);
  if(position>=0)lineup.splice(position,1);
@@ -46,18 +52,53 @@ function renderRoster(){
   details.textContent='速度 '+member.speed+' · 耐力 '+member.hearts+' · 球力 '+member.damage;
   button.replaceChildren((position>=0?(position+1)+'. ':'')+member.name+'｜'+member.role,details);
  });
- el('lineup').textContent='上場順序：'+(lineup.map(i=>roster[i].name).join(' → ')||'尚未選角')+'（'+lineup.length+'/3）';
+ el('lineup').textContent='隊長與隊友：'+(lineup.map(i=>roster[i].name).join(' → ')||'尚未選角')+'（'+lineup.length+'/3）';
  el('start').disabled=lineup.length!==3;
 }
 renderRoster();
 let charge=0, touchTarget=null;
 const courtDirections=new Map();
 const landscape=matchMedia("(orientation: landscape) and (max-height: 600px)");
-let active=false, player=280, enemy=280, hp=3, points=0, t=0, next=0, cooldown=0, inv=0, balls=[], flash=0;
-function stats(){el('matchup').textContent=ally().name+'｜耐力 '+stamina+'　對手 '+Math.min(rival+1,3)+'/3｜耐力 '+rivalHealth;el('charge').textContent=charge===3?'就緒':charge+'/3';el('throw').textContent=charge===3?'蓄力反擊':'反擊';el('hp').textContent=hp;el('score').textContent=points;el('time').textContent=Math.max(0,Math.ceil(60-t));}
-function start(){if(lineup.length!==3)return;active=true;touchTarget=null;player=enemy=280;hp=3;stamina=ally().hearts;rival=0;rivalHealth=4;el('selection').hidden=true;charge=0;points=t=cooldown=inv=flash=0;next=.55;balls=[];inputs.clear();courtDirections.clear();el('screen').hidden=true;stats();}
-function end(){active=false;inputs.clear();courtDirections.clear();el('selection').hidden=false;el('heading').textContent=rival===3?'接力盃獲勝！':hp?'時間到！':'全隊退場';el('hint').textContent='這一輪拿到 '+points+' 分';el('start').textContent='再玩一次';el('screen').hidden=false;el('start').focus();}
-function toss(){if(!active||cooldown>0)return;cooldown=.43;const power=charge===3;if(power)charge=0;balls.push({x:player,y:399,vx:0,vy:-(ally().throwSpeed+(power?200:0)),damage:ally().damage+(power?1:0),team:true,power});}
+let active=false, points=0, t=0, next=0, assist=0, cooldown=0, balls=[], flash=0;
+const living=team=>team.filter(member=>member.health>0);
+const health=team=>team.reduce((sum,member)=>sum+member.health,0);
+function stats(){
+ el('charge').textContent=charge===3?'就緒':charge+'/3';
+ el('throw').textContent=charge===3?'蓄力反擊':'反擊';
+ el('hp').textContent=living(allies).length;
+ el('score').textContent=points;
+ el('time').textContent=Math.max(0,Math.ceil(60-t));
+ el('matchup').textContent=ally().name+'｜耐力 '+(allies[captain]?.health ?? 0)+'　對方剩 '+living(rivals).length+'/3';
+}
+function start(){
+ if(lineup.length!==3)return;
+ allies=lineup.map((id,i)=>({x:fieldSlot[i],y:i===0?418:360,health:roster[id].hearts,inv:0,profile:roster[id]}));
+ rivals=opponents.map((profile,i)=>({x:fieldSlot[i],y:i===0?53:110,health:profile.hearts,inv:0,profile}));
+ captain=0;active=true;touchTarget=null;charge=points=t=cooldown=flash=0;next=.65;assist=2;balls=[];
+ inputs.clear();courtDirections.clear();el('selection').hidden=true;el('screen').hidden=true;stats();
+}
+function end(){
+ active=false;inputs.clear();courtDirections.clear();touchTarget=null;
+ const difference=living(allies).length-living(rivals).length || health(allies)-health(rivals);
+ el('selection').hidden=false;
+ el('heading').textContent=difference>0?'我方獲勝！':difference<0?'對手獲勝':'平手！';
+ el('hint').textContent='我方 '+living(allies).length+' 人｜對方 '+living(rivals).length+' 人｜'+points+' 分';
+ el('start').textContent='再玩一次';el('screen').hidden=false;el('start').focus();
+}
+function launch(from,x,y,speed,team,damage,power=false){
+ const length=Math.hypot(x-from.x,y-from.y);
+ if(!length)return;
+ balls.push({x:from.x,y:from.y,vx:(x-from.x)*speed/length,vy:(y-from.y)*speed/length,team,damage,power});
+}
+function toss(aim){
+ if(!active||cooldown>0)return;
+ const from=allies[captain];
+ const target=living(rivals).reduce((best,member)=>
+   !best||Math.abs(member.x-aim)<Math.abs(best.x-aim)?member:best,null);
+ if(!target)return;
+ cooldown=.43;const power=charge===3;if(power)charge=0;
+ launch(from,target.x,target.y,ally().throwSpeed+(power?200:0),true,ally().damage+(power?1:0),power);
+}
 function circle(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();}
 function soldier(x,y,uniform,helmet){
  ctx.fillStyle='#142b25';ctx.fillRect(x-15,y+10,12,12);ctx.fillRect(x+3,y+10,12,12);
@@ -72,36 +113,82 @@ function draw(){
  ctx.beginPath();ctx.moveTo(22,235);ctx.lineTo(W-22,235);ctx.stroke();
  ctx.beginPath();ctx.arc(280,235,48,0,Math.PI*2);ctx.stroke();
  for(let i=0;i<12;i++){ctx.fillStyle=i%2?'#edc56e':'#314a39';ctx.fillRect(22+i*43,22,43,7);ctx.fillRect(22+i*43,H-29,43,7);}
- if(rival<3)soldier(enemy,56,['#ad5c4d','#b487b9','#c17e4c'][rival],'#573735');
- if(inv<=0||Math.floor(inv*13)%2===0)soldier(player,424,...ally().color);
+ for(const member of [...rivals,...allies]){
+   if(member.health<=0)continue;
+   if(member===allies[captain]){
+     ctx.strokeStyle='#fff6a5';ctx.lineWidth=3;ctx.strokeRect(member.x-26,member.y-42,52,66);
+   }
+   if(member.inv<=0||Math.floor(member.inv*13)%2===0)soldier(member.x,member.y,...member.profile.color);
+   for(let i=0;i<member.health;i++)ctx.fillRect(member.x-12+i*8,member.y+27,6,4);
+ }
  for(const b of balls){circle(b.x,b.y,b.power?16:10,b.power?'#91eff6':b.team?'#f5d476':'#ff856e');circle(b.x-3,b.y-4,3,'#fff0c9');}
 }
 function step(dt){
- t+=dt;cooldown-=dt;inv-=dt;flash-=dt;
+ t+=dt;cooldown-=dt;flash-=dt;
+ const controlled=allies[captain];
  const held=[...courtDirections.values()];
- const right=inputs.has('ArrowRight')||inputs.has('d')||held.includes(1),left=inputs.has('ArrowLeft')||inputs.has('a')||held.includes(-1);
+ const right=inputs.has('ArrowRight')||inputs.has('d')||held.includes(1);
+ const left=inputs.has('ArrowLeft')||inputs.has('a')||held.includes(-1);
  const direction=Number(right)-Number(left);
  if(direction)touchTarget=null;
  const reach=ally().speed*dt;
- const delta=touchTarget===null?reach*direction:Math.max(-reach,Math.min(reach,touchTarget-player));
- player=Math.max(40,Math.min(520,player+delta));
- enemy=280+202*Math.sin(t*(1.25+t/85));
- if(inputs.has(' '))toss();
- if(t>=next){next=t+Math.max(.42,1.22-t*.015);const vy=225+t*2.4+rival*18;balls.push({x:enemy,y:78,vx:(player-enemy)*vy/345,vy,team:false});}
- balls=balls.filter(b=>{
-   b.x+=b.vx*dt;b.y+=b.vy*dt;
-   if(b.team&&rival<3&&Math.hypot(b.x-enemy,b.y-56)<(b.power?36:27)){points+=b.power?200:100;rivalHealth=Math.max(0,rivalHealth-b.damage);if(rivalHealth===0&&++rival<3)rivalHealth=4;return false;}
-   if(!b.team&&Math.hypot(b.x-player,b.y-416)<27&&inv<=0){if(--stamina===0){hp--;if(hp>0)stamina=ally().hearts;}inv=.9;flash=.23;return false;}
-   if(!b.team&&b.y>H+10){points+=10;charge=Math.min(3,charge+1);return false;}
-   return b.y>-15;
+ const delta=touchTarget===null?reach*direction:Math.max(-reach,Math.min(reach,touchTarget-controlled.x));
+ controlled.x=Math.max(40,Math.min(520,controlled.x+delta));
+ for(const [i,member] of allies.entries()){
+   member.inv-=dt;
+   if(i===captain)continue;
+   member.x=fieldSlot[i]+29*Math.sin(t*1.5+i);
+ }
+ for(const [i,member] of rivals.entries()){
+   member.inv-=dt;
+   member.x=fieldSlot[i]+(i===0?90:65)*Math.sin(t*member.profile.speed/145+i*2);
+ }
+ if(inputs.has(' '))toss(controlled.x);
+ if(t>=assist){
+   assist=t+2.2;
+   const helpers=living(allies).filter(member=>member!==controlled);
+   const targets=living(rivals);
+   if(helpers.length){
+     const from=helpers[Math.floor(Math.random()*helpers.length)];
+     const target=targets[Math.floor(Math.random()*targets.length)];
+     launch(from,target.x,target.y,from.profile.throwSpeed*.85,true,from.profile.damage);
+   }
+ }
+ if(t>=next){
+   next=t+Math.max(.55,1.2-t*.01);
+   const attackers=living(rivals), targets=living(allies);
+   const from=attackers[Math.floor(Math.random()*attackers.length)];
+   const target=targets[Math.floor(Math.random()*targets.length)];
+   launch(from,target.x,target.y,from.profile.throwSpeed+t*1.4,false,1);
+ }
+ balls=balls.filter(ball=>{
+   ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+   const hit=(ball.team?rivals:allies).find(member=>member.health>0&&member.inv<=0&&
+     Math.hypot(ball.x-member.x,ball.y-member.y)<(ball.power?33:24));
+   if(hit){
+     hit.health=Math.max(0,hit.health-ball.damage);
+     hit.inv=.35;
+     if(ball.team)points+=ball.power?200:100;
+     else {
+       flash=.23;
+       if(hit===allies[captain]&&!hit.health){
+         const nextCaptain=allies.findIndex(member=>member.health>0);
+         if(nextCaptain>=0){captain=nextCaptain;touchTarget=null;}
+       }
+     }
+     return false;
+   }
+   if(ball.x>=-15&&ball.x<=W+15&&ball.y>=-15&&ball.y<=H+15)return true;
+   if(!ball.team){points+=10;charge=Math.min(3,charge+1);}
+   return false;
  });
- stats();if(hp<=0||t>=60||rival===3)end();
+ stats();if(!living(allies).length||!living(rivals).length||t>=60)end();
 }
 let last=performance.now();
 function frame(now){const dt=Math.min(.04,(now-last)/1000);last=now;if(active)step(dt);draw();requestAnimationFrame(frame);}
 el('start').onclick=start;
-el('throw').onpointerdown=event=>{if(event.button===0)toss();};
-el('throw').onclick=event=>{if(event.detail===0)toss();};
+el('throw').onpointerdown=event=>{if(event.button===0)toss(allies[captain]?.x);};
+el('throw').onclick=event=>{if(event.detail===0)toss(allies[captain]?.x);};
 for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight']]){
  const button=el(id);
  button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);inputs.add(key);button.classList.add("pressed");};
@@ -110,7 +197,7 @@ for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight']]){
 function drag(e){const rect=court.getBoundingClientRect();touchTarget=Math.max(40,Math.min(520,(e.clientX-rect.left)*W/rect.width));}
 court.onpointerdown=e=>{if(!active||e.button!==0)return;
  const rect=court.getBoundingClientRect();
- if(e.clientY<rect.top+rect.height/2){toss();return;}
+ if(e.clientY<rect.top+rect.height/2){toss((e.clientX-rect.left)*W/rect.width);return;}
  court.setPointerCapture(e.pointerId);updateCourtMove(e);};
 court.onpointermove=e=>{if(active&&court.hasPointerCapture(e.pointerId))updateCourtMove(e);};
 function updateCourtMove(e){
@@ -123,7 +210,7 @@ for(const event of ['pointerup','pointercancel','lostpointercapture']){
  court.addEventListener(event,e=>courtDirections.delete(e.pointerId));
 }
 landscape.addEventListener('change',()=>{courtDirections.clear();touchTarget=null;});
-window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss();}});
+window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss(allies[captain]?.x);}});
 window.addEventListener('keyup',e=>inputs.delete(e.key.length===1?e.key.toLowerCase():e.key));
 window.addEventListener('blur',()=>{inputs.clear();courtDirections.clear();touchTarget=null;});
 requestAnimationFrame(frame);
