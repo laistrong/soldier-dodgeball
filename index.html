@@ -7,10 +7,10 @@
  .court canvas{height:min(70dvh,470px);width:100%}.controls{display:none}.court:has(.screen[hidden]) #touch-guide{display:flex}
  #selection h2{font-size:19px}.roster{grid-template-columns:repeat(4,minmax(0,1fr));margin:5px 0}.pick{font-size:12px}
  main:has(#selection[hidden])>h1,main:has(#selection[hidden])>p:not(#matchup){display:none}
-}#touch-guide button{pointer-events:auto;padding:3px 12px;min-height:40px}#touch-guide{align-items:end}</style>
+}#touch-guide button{pointer-events:auto;padding:3px 12px;min-height:40px}#touch-guide{align-items:end}.court:has(.screen[hidden]) #touch-guide{display:flex}#touch-guide span{font-size:clamp(11px,3vw,16px)}canvas{-webkit-touch-callout:none;user-select:none}</style>
 <main><h1>小兵躲避球：接力盃</h1><p>六人同場只用一顆球。接住就取得球權，被打中就出局。</p><section id="selection"><h2>3 對 3｜選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
-<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide" aria-hidden="true"><span>◀ 按住左移</span><button id="catch-court" type="button">接球</button><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">三對三同場。擊退全隊即勝；時間到比存活人數，人數相同就平手。</p><button id="start">開始</button></div></div>
-<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">投球</button><button id="catch">接球</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機橫放：按住左右移動，點對手投球；來球靠近時按「接球」。電腦按 C 接球。</p></main>
+<div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div id="touch-guide"><span>◀ 按住左移</span><button id="catch-court" type="button">接球</button><span>按住右移 ▶</span></div><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">三對三同場。擊退全隊即勝；時間到比存活人數，人數相同就平手。</p><button id="start">開始</button></div></div>
+<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">投球</button><button id="catch">接球</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機：按住球場左下或右下連續移動，放開即停，點對手投球；來球靠近時按「接球」。電腦按 C 接球。</p></main>
 <script>
 const el=id=>document.getElementById(id);
 const court=el('court'), ctx=court.getContext('2d');
@@ -56,7 +56,7 @@ function renderRoster(){
  el('start').disabled=lineup.length!==3;
 }
 renderRoster();
-let charge=0, touchTarget=null;
+let charge=0;
 const courtDirections=new Map();
 const landscape=matchMedia("(orientation: landscape) and (max-height: 600px)");
 let holder=null, flight=null, catchUntil=0, heldSince=0;
@@ -76,11 +76,11 @@ function start(){
  if(lineup.length!==3)return;
  allies=lineup.map((id,i)=>({x:fieldSlot[i],y:i===0?418:360,health:1,inv:0,profile:roster[id]}));
  rivals=opponents.map((profile,i)=>({x:fieldSlot[i],y:i===0?53:110,health:1,inv:0,profile}));
- captain=0;active=true;touchTarget=null;charge=points=t=cooldown=flash=0;holder=allies[0];flight=null;catchUntil=0;heldSince=0;
+ captain=0;active=true;charge=points=t=cooldown=flash=0;holder=allies[0];flight=null;catchUntil=0;heldSince=0;
  inputs.clear();courtDirections.clear();el('selection').hidden=true;el('screen').hidden=true;stats();
 }
 function end(){
- active=false;inputs.clear();courtDirections.clear();touchTarget=null;
+ active=false;inputs.clear();courtDirections.clear();
  const difference=living(allies).length-living(rivals).length;
  el('selection').hidden=false;
  el('heading').textContent=difference>0?'我方獲勝！':difference<0?'對手獲勝':'平手！';
@@ -135,9 +135,7 @@ function step(dt){
  const right=inputs.has('ArrowRight')||inputs.has('d')||held.includes(1);
  const left=inputs.has('ArrowLeft')||inputs.has('a')||held.includes(-1);
  const direction=Number(right)-Number(left);
- if(direction)touchTarget=null;
- const reach=ally().speed*dt;
- const delta=touchTarget===null?reach*direction:Math.max(-reach,Math.min(reach,touchTarget-controlled.x));
+ const delta=ally().speed*dt*direction;
  controlled.x=Math.max(40,Math.min(520,controlled.x+delta));
  for(const [i,member] of allies.entries()){
    member.inv-=dt;
@@ -170,7 +168,7 @@ function step(dt){
        if(ball.team)points+=ball.power?200:100;
        if(hit===controlled){
          const replacement=allies.findIndex(member=>member.health>0);
-         if(replacement>=0){captain=replacement;touchTarget=null;}
+         if(replacement>=0){captain=replacement;}
        }
        holder=living(defending)[0]||null;
      }
@@ -195,24 +193,24 @@ for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight']]){
  button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);inputs.add(key);button.classList.add("pressed");};
  for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,()=>{inputs.delete(key);button.classList.remove("pressed");});
 }
-function drag(e){const rect=court.getBoundingClientRect();touchTarget=Math.max(40,Math.min(520,(e.clientX-rect.left)*W/rect.width));}
-court.onpointerdown=e=>{if(!active||e.button!==0)return;
+court.onpointerdown=e=>{if(!active||(e.pointerType==='mouse'&&e.button!==0))return;
+ e.preventDefault();
  const rect=court.getBoundingClientRect();
  if(e.clientY<rect.top+rect.height/2){toss((e.clientX-rect.left)*W/rect.width);return;}
  court.setPointerCapture(e.pointerId);updateCourtMove(e);};
 court.onpointermove=e=>{if(active&&court.hasPointerCapture(e.pointerId))updateCourtMove(e);};
 function updateCourtMove(e){
- if(!landscape.matches){drag(e);return;}
- touchTarget=null;
+ 
+ 
  const rect=court.getBoundingClientRect();
  courtDirections.set(e.pointerId,e.clientX<rect.left+rect.width/2?-1:1);
 }
 for(const event of ['pointerup','pointercancel','lostpointercapture']){
  court.addEventListener(event,e=>courtDirections.delete(e.pointerId));
 }
-landscape.addEventListener('change',()=>{courtDirections.clear();touchTarget=null;});
+landscape.addEventListener('change',()=>{courtDirections.clear();});
 window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();if(active&&key==='c'){e.preventDefault();if(!e.repeat)catchBall();return;}const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss(allies[captain]?.x);}});
 window.addEventListener('keyup',e=>inputs.delete(e.key.length===1?e.key.toLowerCase():e.key));
-window.addEventListener('blur',()=>{inputs.clear();courtDirections.clear();touchTarget=null;});
+window.addEventListener('blur',()=>{inputs.clear();courtDirections.clear();});
 requestAnimationFrame(frame);
 </script></html>
