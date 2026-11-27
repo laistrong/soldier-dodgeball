@@ -4,7 +4,7 @@
 .roster{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.pick{background:#253f32;color:#fff8df;text-align:left;font-size:14px;padding:8px 10px;border:2px solid transparent}.pick[aria-pressed=true]{border-color:#f5d476}.pick small{display:block;color:#d4e5c9}button:disabled{opacity:.55;cursor:not-allowed}.hud{flex-wrap:wrap}.hud span{min-width:66px;font-size:14px}.controls button{box-shadow:0 4px 0 #8f7339;user-select:none;-webkit-user-select:none}.controls button:active,.controls button.pressed{transform:translateY(3px);box-shadow:0 1px 0 #8f7339;background:#ffe79e}</style>
 <main><h1>小兵躲避球：接力盃</h1><p>從四位隊員挑三位，依選擇順序輪替。閃過三球就能丟蓄力球。</p><section id="selection"><h2>選擇你的隊伍</h2><div class="roster" id="roster"></div><p id="lineup" aria-live="polite"></p></section><p id="matchup"></p><div class="hud"><span>分數 <b id="score">0</b></span><span>隊員 <b id="hp">3</b></span><span>倒數 <b id="time">60</b></span><span>蓄力 <b id="charge">0/3</b></span></div>
 <div class="court"><canvas id="court" width="560" height="470" aria-label="躲避球球場"></canvas><div class="screen" id="screen"><h2 id="heading">準備上場</h2><p id="hint">選好三位再上場。60 秒內擊退三名對手即可獲勝。</p><button id="start">開始</button></div></div>
-<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">反擊</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機：按左右鍵或在場上拖動。</p></main>
+<div class="controls"><button id="left" aria-label="左移">◀</button><button id="throw">反擊</button><button id="right" aria-label="右移">▶</button></div><p>電腦：← → 或 A、D 移動，空白鍵反擊。手機：在下半場點按或拖動來移動，點上半場丟球。也可以用畫面按鈕。</p></main>
 <script>
 const el=id=>document.getElementById(id);
 const court=el('court'), ctx=court.getContext('2d');
@@ -44,10 +44,10 @@ function renderRoster(){
  el('start').disabled=lineup.length!==3;
 }
 renderRoster();
-let charge=0;
+let charge=0, touchTarget=null;
 let active=false, player=280, enemy=280, hp=3, points=0, t=0, next=0, cooldown=0, inv=0, balls=[], flash=0;
 function stats(){el('matchup').textContent=ally().name+'｜耐力 '+stamina+'　對手 '+Math.min(rival+1,3)+'/3｜耐力 '+rivalHealth;el('charge').textContent=charge===3?'就緒':charge+'/3';el('throw').textContent=charge===3?'蓄力反擊':'反擊';el('hp').textContent=hp;el('score').textContent=points;el('time').textContent=Math.max(0,Math.ceil(60-t));}
-function start(){if(lineup.length!==3)return;active=true;player=enemy=280;hp=3;stamina=ally().hearts;rival=0;rivalHealth=4;el('selection').hidden=true;charge=0;points=t=cooldown=inv=flash=0;next=.55;balls=[];inputs.clear();el('screen').hidden=true;stats();}
+function start(){if(lineup.length!==3)return;active=true;touchTarget=null;player=enemy=280;hp=3;stamina=ally().hearts;rival=0;rivalHealth=4;el('selection').hidden=true;charge=0;points=t=cooldown=inv=flash=0;next=.55;balls=[];inputs.clear();el('screen').hidden=true;stats();}
 function end(){active=false;inputs.clear();el('selection').hidden=false;el('heading').textContent=rival===3?'接力盃獲勝！':hp?'時間到！':'全隊退場';el('hint').textContent='這一輪拿到 '+points+' 分';el('start').textContent='再玩一次';el('screen').hidden=false;el('start').focus();}
 function toss(){if(!active||cooldown>0)return;cooldown=.43;const power=charge===3;if(power)charge=0;balls.push({x:player,y:399,vx:0,vy:-(ally().throwSpeed+(power?200:0)),damage:ally().damage+(power?1:0),team:true,power});}
 function circle(x,y,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();}
@@ -71,7 +71,11 @@ function draw(){
 function step(dt){
  t+=dt;cooldown-=dt;inv-=dt;flash-=dt;
  const right=inputs.has('ArrowRight')||inputs.has('d'),left=inputs.has('ArrowLeft')||inputs.has('a');
- player=Math.max(40,Math.min(520,player+ally().speed*dt*(Number(right)-Number(left))));
+ const direction=Number(right)-Number(left);
+ if(direction)touchTarget=null;
+ const reach=ally().speed*dt;
+ const delta=touchTarget===null?reach*direction:Math.max(-reach,Math.min(reach,touchTarget-player));
+ player=Math.max(40,Math.min(520,player+delta));
  enemy=280+202*Math.sin(t*(1.25+t/85));
  if(inputs.has(' '))toss();
  if(t>=next){next=t+Math.max(.42,1.22-t*.015);const vy=225+t*2.4+rival*18;balls.push({x:enemy,y:78,vx:(player-enemy)*vy/345,vy,team:false});}
@@ -94,8 +98,11 @@ for(const [id,key] of [['left','ArrowLeft'],['right','ArrowRight']]){
  button.onpointerdown=e=>{button.setPointerCapture(e.pointerId);inputs.add(key);button.classList.add("pressed");};
  for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,()=>{inputs.delete(key);button.classList.remove("pressed");});
 }
-function drag(e){const rect=court.getBoundingClientRect();player=Math.max(40,Math.min(520,(e.clientX-rect.left)*W/rect.width));}
-court.onpointerdown=e=>{if(active){court.setPointerCapture(e.pointerId);drag(e);}};
+function drag(e){const rect=court.getBoundingClientRect();touchTarget=Math.max(40,Math.min(520,(e.clientX-rect.left)*W/rect.width));}
+court.onpointerdown=e=>{if(!active||e.button!==0)return;
+ const rect=court.getBoundingClientRect();
+ if(e.clientY<rect.top+rect.height/2){toss();return;}
+ court.setPointerCapture(e.pointerId);drag(e);};
 court.onpointermove=e=>{if(active&&court.hasPointerCapture(e.pointerId))drag(e);};
 window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const control=key.startsWith('arrow')?e.key:key;if(active&&['ArrowLeft','ArrowRight','a','d',' '].includes(control)){e.preventDefault();inputs.add(control);if(control===' ')toss();}});
 window.addEventListener('keyup',e=>inputs.delete(e.key.length===1?e.key.toLowerCase():e.key));
